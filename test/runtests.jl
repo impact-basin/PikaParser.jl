@@ -7,4 +7,5 @@ using Test
     include("clauses.jl")
     include("precedence.jl")
     include("fastmatch.jl")
+    include("macros.jl")
 end
