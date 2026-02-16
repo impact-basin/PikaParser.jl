@@ -13,5 +13,6 @@ include("memo.jl")
 include("parse.jl")
 include("q.jl")
 include("traverse.jl")
+include("macros.jl")
 
 end # module
