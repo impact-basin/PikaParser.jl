@@ -25,5 +25,13 @@
     @test folded[2] == :Bar
     @test folded[3] == :bA9Z
     @test folded[4] == :QUx
+
+    idents_to_syms = P.@evaluate :top m v begin
+        :ident => Symbol(m.view)
+        :decl  => v[1]
+    end
+
+    ids = identifiers("foo Bar bA9Z QUx") |> idents_to_syms
+    @test all(folded .== ids)
 end
 

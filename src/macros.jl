@@ -105,3 +105,49 @@ macro grammar(startrule, expr)
             $x)
     end |> esc
 end
+
+macro evaluate(top, m, v, exprs)
+
+    # see the definition of @grammar for an explanation
+    localnames = names(__module__, imported=true)
+    localmods  = [name for name in localnames
+                    if @eval(__module__,
+                        try
+                            $name isa Module
+                        catch e
+                            false
+                        end)]
+    P = [mod for mod in localmods
+            if @eval(__module__, nameof($mod) == :PikaParser)][1]
+
+    # gather our rules (in the form rule => value)
+    # as "m.rule == rule ? value : v" form.
+    rules = Expr[]
+    postwalk(exprs) do e
+        @capture(e, rule_ => value_) || return e
+        push!(rules, quote 
+            $(m).rule == $rule ? begin $value end :
+                (length($v) > 1 ? $(v) : length(v) == 1 ? $(v)[1] : nothing)
+        end)
+        return e
+    end
+
+    # rewrite the AST so that the "else" node
+    # now points to the next expression.
+    reducedrules = reduce(reverse(rules)) do r1, r2
+        r2.args[2].args[3] = r1
+        r2
+    end
+
+    # generate our evaluator function with fold
+    # mapping to the reduced ruleset
+    @gensym parsed
+    return quote
+        $parsed -> $P.traverse_match($parsed,
+            $P.find_match_at!($parsed, $top, 1),
+            fold = function ($m, _, $v)
+                $(reducedrules)
+            end
+        )
+    end |> esc
+end
