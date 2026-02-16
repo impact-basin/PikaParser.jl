@@ -1,13 +1,15 @@
 name = "PikaParser"
 uuid = "3bbf5609-3e7b-44cd-8549-7c69f321e792"
-authors = ["The developers of PikaParser.jl"]
 version = "0.6.1"
+authors = ["The developers of PikaParser.jl"]
 
 [deps]
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 
 [compat]
 DocStringExtensions = "0.8, 0.9"
+MacroTools = "0.5.16"
 julia = "1.6"
 
 [extras]
