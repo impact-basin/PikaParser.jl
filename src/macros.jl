@@ -123,7 +123,6 @@ macro evaluate(top, m, v, exprs)
     # as "m.rule == rule ? value : v" form.
     rules = Expr[]
     postwalk(exprs) do e
-        @info :postwalk e
         @capture(e, rule_quote => value_) || return e
         push!(rules, quote 
             $(m).rule == $rule ? begin $value end :
