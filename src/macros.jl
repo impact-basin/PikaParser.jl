@@ -40,7 +40,6 @@ macro grammar(startrule, expr)
     # This gives us the symbol we need to prefix our calls with.
     P = [mod for mod in localmods
             if @eval(__module__, nameof($mod) == :PikaParser)][1]
-
     
     # now we define our substitutions against that symbol.
     pika_syms = Dict(
@@ -66,7 +65,7 @@ macro grammar(startrule, expr)
     rules = postwalk(rules) do e
 
         # match the regex string, and pull any tail arguments.
-        @capture(e, id_ => @r_str regexstr__) || return e
+        @capture(e, id_quote => @r_str regexstr__) || return e
         regex, args = length(regexstr) > 1 ? (regexstr[1], regexstr[2]) :
                                              (regexstr[1], nothing)
 
@@ -124,7 +123,8 @@ macro evaluate(top, m, v, exprs)
     # as "m.rule == rule ? value : v" form.
     rules = Expr[]
     postwalk(exprs) do e
-        @capture(e, rule_ => value_) || return e
+        @info :postwalk e
+        @capture(e, rule_quote => value_) || return e
         push!(rules, quote 
             $(m).rule == $rule ? begin $value end :
                 (length($v) > 1 ? $(v) : length(v) == 1 ? $(v)[1] : nothing)
