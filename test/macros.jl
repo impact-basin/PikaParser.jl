@@ -35,3 +35,29 @@
     @test all(folded .== ids)
 end
 
+@testset "Maybe" begin
+
+    g = P.@grammar :top begin
+        :ws    => some(satisfy(isspace)),
+        :ident => seq(r"[a-zA-Z_]", r"[a-zA-Z0-9_]*"),
+        :digit => r"[0-9]+",
+        :expr  => seq(:ident, :ws, maybe(:digit)),
+        :exws  => seq(maybe(:ws), :expr),
+        :top   => some(:exws)
+    end
+
+    a = P.@evaluate :top m v begin
+        :ident => Symbol(m.view)
+        :digit => parse(Int, m.view)
+        :expr  => (v[1] => v[3])
+        :exws  => v[2]
+        :top   => v
+    end
+
+    parsed = g("foo_bar 1 bar baz 23 qux 45") |> a
+    @test parsed[1] == (:foo_bar => 1)
+    @test parsed[2] == (:bar     => nothing)
+    @test parsed[3] == (:baz     => 23)
+    @test parsed[4] == (:qux     => 45)
+
+end

@@ -65,23 +65,29 @@ macro grammar(startrule, expr)
     rules = postwalk(rules) do e
 
         # match the regex string, and pull any tail arguments.
-        @capture(e, id_quote => @r_str regexstr__) || return e
+        @capture(e, @r_str regexstr__) || return e
         regex, args = length(regexstr) > 1 ? (regexstr[1], regexstr[2]) :
                                              (regexstr[1], nothing)
 
-        # force a '^' at the beginning to fend off maximal munch
+        # force a '^' at the beginning to fend off maximal munch,
+        # then compile the regex.
         regex = regex[1] == '^' ? regex : "^" * regex
-
-        # finally, compile the regex, and rewrite the node.
         r = isnothing(args) ? Regex(regex) : Regex(regex, args)
+
         @gensym x matched
         return quote
-            $id => scan() do $x
+            scan($x -> begin
                 $matched = match($r, $x)
                 isnothing($matched) && return 0
                 return length($matched.match)
-            end
+            end) 
         end
+    end
+
+    # add maybe() tags.
+    rules = postwalk(rules) do e
+        @capture(e, maybe(expr__)) || return e
+        return quote first($(expr...), epsilon) end
     end
 
     # walk the expression tree, add PikaParser qualification
