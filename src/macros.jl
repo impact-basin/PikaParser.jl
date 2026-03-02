@@ -131,8 +131,11 @@ macro evaluate(top, m, v, exprs)
     postwalk(exprs) do e
         @capture(e, rule_quote => value_) || return e
         push!(rules, quote 
-            $(m).rule == $rule ? begin $value end :
-                (length($v) > 1 ? $(v) : length(v) == 1 ? $(v)[1] : nothing)
+            $(m).rule == $rule ?
+                begin $value end :
+                ($v == [nothing] ?
+                    $(m).view :
+                    $v)
         end)
         return e
     end
