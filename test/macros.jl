@@ -1,6 +1,6 @@
 @testset "Helper macros" begin
 
-    identifiers = P.@grammar :top begin
+    identifiers = P.@syntax :top begin
         :ws    => first(satisfy(isspace), epsilon),
         :ident => r"[a-z_]+[a-z0-9_]*"i,
         :decl  => seq(:ident, :ws),
@@ -26,7 +26,7 @@
     @test folded[3] == :bA9Z
     @test folded[4] == :QUx
 
-    idents_to_syms = P.@evaluate :top m v begin
+    idents_to_syms = P.@semantics :top m v begin
         :ident => Symbol(m.view)
         :decl  => v[1]
     end
@@ -37,7 +37,7 @@ end
 
 @testset "Maybe" begin
 
-    g = P.@grammar :top begin
+    g = P.@syntax :top begin
         :ws    => some(satisfy(isspace)),
         :ident => seq(r"[a-zA-Z_]", r"[a-zA-Z0-9_]*"),
         :digit => r"[0-9]+",
@@ -46,10 +46,13 @@ end
         :top   => some(:exws)
     end
 
-    a = P.@evaluate :top m v begin
+    a = P.@semantics :top m v begin
         :ident => Symbol(m.view)
         :digit => parse(Int, m.view)
-        :expr  => (v[1] => v[3])
+        :expr  => begin
+            v[3]  == [] ? v[1] => nothing :
+                          v[1] => v[3][1]
+        end
         :exws  => v[2]
         :top   => v
     end

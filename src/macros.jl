@@ -11,7 +11,7 @@ using MacroTools: @capture, postwalk, rmlines
 
     See documentation (to be written!) about its usage.
 """
-macro grammar(startrule, expr)
+macro syntax(startrule, expr)
 
     # the first thing we have to do is work out how
     # PikaParser was called in the current context --
@@ -111,7 +111,7 @@ macro grammar(startrule, expr)
     end |> esc
 end
 
-macro evaluate(top, m, v, exprs)
+macro semantics(top, m, v, exprs)
 
     # see the definition of @grammar for an explanation
     localnames = names(__module__, imported=true)
