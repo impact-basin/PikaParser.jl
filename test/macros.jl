@@ -1,9 +1,9 @@
 @testset "Helper macros" begin
 
     identifiers = P.@syntax :top begin
-        :ws    => first(satisfy(isspace), epsilon),
-        :ident => r"[a-z_]+[a-z0-9_]*"i,
-        :decl  => seq(:ident, :ws),
+        :ws    => first(satisfy(isspace), epsilon)
+        :ident => r"[a-z_]+[a-z0-9_]*"i
+        :decl  => seq(:ident, :ws)
         :top   => some(:decl)
     end
     p = identifiers("foo Bar bA9Z QUx")
@@ -13,7 +13,7 @@
     folded = P.traverse_match(
         p,
         m,
-        fold = (m, p, v) ->
+        fold = (m, _, v) ->
             m.rule == :ident ? Symbol(m.view) :
             m.rule == :decl  ? v[1]           :
             m.rule == :top   ? v              :
@@ -35,14 +35,54 @@
     @test all(folded .== ids)
 end
 
+# this declaration must happen outside of the local
+# scope created by testset.
+myisdigit(x) = isdigit(x)
+myisspace(x) = isspace(x)
+
+@testset "Calculator" begin
+
+    syntax = P.@syntax :top begin
+        :ws     => many(satisfy(myisspace))
+        :number => some(:digit => satisfy(myisdigit))
+        :plus   => seq(:pexpr, :ws, token('+'), :ws, :pexpr, :ws)
+        :minus  => seq(:pexpr, :ws, token('-'), :ws, :pexpr, :ws)
+        :times  => seq(:pexpr, :ws, token('*'), :ws, :pexpr, :ws)
+        :divby  => seq(:pexpr, :ws, token('/'), :ws, :pexpr, :ws)
+        :paren  => seq(token('('), :ws, :expr, :ws, token(')'), :ws)
+        :expr   => first(:times, :divby, :plus, :minus, :number)
+        :pexpr  => first(:paren, :expr)
+        :top    => seq(:ws, :pexpr)
+    end
+
+    semantics = @P.semantics :top m v begin
+        :number => parse(Int, m.view)
+        :expr   => v[1]
+        :plus   => v[1] + v[5]
+        :minus  => v[1] - v[5]
+        :times  => v[1] * v[5]
+        :divby  => v[1] / v[5]
+        :paren  => v[3]
+        :expr   => v[1]
+        :pexpr  => v[1]
+        :top    => v[2]
+    end
+
+    calc = x -> x |> syntax |> semantics
+
+    @test calc("3 + 2 + 8") == 13
+    @test calc("3 * (2 + 16)") == 54
+    @test calc("3 + 5 * (2 + 16)") == 93
+end
+
 @testset "Maybe" begin
 
     g = P.@syntax :top begin
-        :ws    => some(satisfy(isspace)),
-        :ident => seq(r"[a-zA-Z_]", r"[a-zA-Z0-9_]*"),
+        :ws    => some(satisfy(isspace))
+        :ident => seq(r"[a-zA-Z_]", r"[a-zA-Z0-9_]*")
         :digit => r"[0-9]+",
-        :expr  => seq(:ident, :ws, maybe(:digit)),
-        :exws  => seq(maybe(:ws), :expr),
+        :expr  => seq(:ident, :ws, maybe(:digit))
+        :exws  => seq(maybe(:ws), :expr)
         :top   => some(:exws)
     end
 
@@ -50,7 +90,7 @@ end
         :ident => Symbol(m.view)
         :digit => parse(Int, m.view)
         :expr  => begin
-            v[3]  == [] ? v[1] => nothing :
+            v[3]  == "" ? v[1] => nothing :
                           v[1] => v[3][1]
         end
         :exws  => v[2]
