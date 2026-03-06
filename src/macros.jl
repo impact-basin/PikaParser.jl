@@ -6,6 +6,18 @@ using MacroTools: @capture, postwalk, rmlines
 
 public @syntax, @semantics
 
+function find_pikaparser(__module__)
+    localmods  = [name for name in names(__module__, imported=true)
+                    if @eval(__module__,
+                        try
+                            $name isa Module
+                        catch e
+                            false
+                        end)]
+    return [mod for mod in localmods
+            if @eval(__module__, nameof($mod) == :PikaParser)][1]
+end
+
 # internal helper function to rewrite regex to scan clauses
 function prepare_regex_expr(regexstr, P)
 
@@ -73,9 +85,9 @@ syn("foo Bar bA9Z QUx") |> sem
 macro syntax(startrule, datatype, exprs)
 
     ids, clauses = [], []
-    @gensym x P
+    @gensym x
 
-    @eval(__module__, import PikaParser as $P)
+    P = find_pikaparser(__module__)
     pika_syms = Dict(
         :satisfy            => :($P.satisfy           ),
         :scan               => :($P.scan              ),
@@ -124,10 +136,10 @@ macro syntax(startrule, datatype, exprs)
     # Evaluate quotenodes and build clauses in
     # calling-module context.
     pairs = map(zip(ids, clauses)) do (id, clause)
-        eval(id) => @eval(__module__, $clause)
+        @eval(__module__, $id) => @eval(__module__, $clause)
     end
 
-    startrule = eval(startrule)
+    startrule = @eval(__module__, $startrule)
     startrule = startrule isa Symbol ?
         [startrule] :
         startrule
@@ -136,20 +148,20 @@ macro syntax(startrule, datatype, exprs)
     g = make_grammar(
         startrule,
         flatten(
-            eval(Dict(pairs...)),
-            eval(datatype)
+            @eval(__module__, Dict($pairs...)),
+            @eval(__module__, $datatype)
         )
     )
 
-    return quote
+    return quote 
         $x -> $P.parse($g, $x)
     end |> esc
 end
 
 macro syntax(startrule, expr)
-    m = @__MODULE__
+    P = find_pikaparser(__module__)
     return quote 
-        $m.@syntax($startrule, Char, $expr)
+        $P.@syntax($startrule, Char, $expr)
     end |> esc
 end
 
@@ -190,7 +202,8 @@ syn("foo Bar bA9Z QUx") |> sem
 """
 macro semantics(top, match, submatches, exprs)
 
-    rules, m, x = Expr[], @__MODULE__, gensym(:x)
+    rules, x = Expr[], gensym(:x)
+    P = find_pikaparser(__module__)
 
     # process the semantic rules.
     postwalk(exprs) do e
@@ -220,8 +233,8 @@ macro semantics(top, match, submatches, exprs)
 
     # generate the fold function.
     return quote
-        $x -> $m.traverse_match($x,
-            $m.find_match_at!($x, $top, 1),
+        $x -> $P.traverse_match($x,
+            $P.find_match_at!($x, $top, 1),
             fold = ($match, _, $submatches) -> $rules
         )
     end |> esc
