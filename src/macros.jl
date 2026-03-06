@@ -6,24 +6,12 @@ using MacroTools: @capture, postwalk, rmlines
 
 public @syntax, @semantics
 
-function find_pikaparser(__module__)
-    localmods  = [name for name in names(__module__, imported=true)
-                    if @eval(__module__,
-                        try
-                            $name isa Module
-                        catch e
-                            false
-                        end)]
-    return [mod for mod in localmods
-            if @eval(__module__, nameof($mod) == :PikaParser)][1]
-end
-
 # internal helper function to rewrite regex to scan clauses
-function prepare_regex_expr(regexstr, P)
+function prepare_regex(regexstr, P)
 
     # pull out the regex string and its args
     regex, args = length(regexstr) > 1 ?
-        (regexstr[1], regexstr[2]) :
+        (regexstr[1], regexstr[2])     :
         (regexstr[1], nothing)
 
     # force a '^' at the regex start
@@ -32,7 +20,7 @@ function prepare_regex_expr(regexstr, P)
 
     # compile the regex
     r = isnothing(args) ?
-        Regex(regex) :
+        Regex(regex)    :
         Regex(regex, args)
 
     # produce the scan clause.
@@ -54,7 +42,15 @@ Define syntax of a grammar with rules given by "exprs".
 
 This produces a PikaParser grammar at compile-time,
 and returns a function applying the grammar to
-an input string.
+an input string. PikaParser symbols (`first`, `seq`, etc.)
+will be resolved to the PikaParser module.
+
+Note that any variables or helper functions used in
+rule expressions must be resolvable at toplevel module scope.
+This is because compile-time grammar preparation must `@eval`
+into the invoking module at macro evaluation time to resolve
+any helper functions defined by PikaParser users; local
+scopes are not accessible to PikaParser. 
 
 An example invocation is given herein.
 
@@ -87,13 +83,14 @@ macro syntax(startrule, datatype, exprs)
     ids, clauses = [], []
     @gensym x
 
-    P = find_pikaparser(__module__)
+    P = @__MODULE__
     pika_syms = Dict(
         :satisfy            => :($P.satisfy           ),
         :scan               => :($P.scan              ),
         :token              => :($P.token             ),
         :tokens             => :($P.tokens            ),
         :epsilon            => :($P.epsilon           ),
+        :ϵ                  => :($P.epsilon           ),
         :fail               => :($P.fail              ),
         :seq                => :($P.seq               ),
         :first              => :($P.first             ),
@@ -103,6 +100,7 @@ macro syntax(startrule, datatype, exprs)
         :many               => :($P.many              ),
         :tie                => :($P.tie               ),
         :precedence_cascade => :($P.precedence_cascade),
+        :end_of_input       => :($P.end_of_input      ),
     )
 
     # process the expressions.
@@ -114,16 +112,11 @@ macro syntax(startrule, datatype, exprs)
         # rewrite names
         e isa Symbol && return get(pika_syms, e, e)
 
-        # rules for maybe()
-        @capture(e, maybe(expr__)) && return quote
-            $P.first($(expr...), $P.epsilon)
-        end
-
         # rules for regex string (continue if no match)
         @capture(e, @r_str regexstr__) &&
-            return prepare_regex_expr(regexstr, P)
+            return prepare_regex(regexstr, P)
 
-        # return if we don't have a toplevel rule
+        # return if we don't have a syntax rule
         @capture(e, id_quote => clause_) ||
             return e
 
@@ -133,10 +126,34 @@ macro syntax(startrule, datatype, exprs)
         return id
     end
 
-    # Evaluate quotenodes and build clauses in
-    # calling-module context.
-    pairs = map(zip(ids, clauses)) do (id, clause)
-        @eval(__module__, $id) => @eval(__module__, $clause)
+    try
+
+        pairs = map(zip(ids, clauses)) do (id, clause)
+            @eval(__module__, $id) => @eval(__module__, $clause)
+        end
+
+        # build the grammar.
+        g = make_grammar(
+            startrule,
+            flatten(
+                @eval(__module__, Dict($pairs...)),
+                @eval(__module__, $datatype)
+            )
+        )
+
+    catch e
+
+        e isa UndefVarError || rethrow()
+
+        @warn("Symbols in syntax clauses were not resolvable at compile-time. "    *
+              "Evaluation of the grammar will be deferred to runtime. "            *
+              "Ensure that all symbols used in clauses are available at "          *
+              "the toplevel scope of module $__module__ for macro-time evaluation.")
+
+        pairs = map(zip(ids, clauses)) do (id, clause)
+            resolved_id = @eval(__module__, $id)
+            resolved_id => clause
+        end |> Dict
     end
 
     startrule = @eval(__module__, $startrule)
@@ -144,40 +161,55 @@ macro syntax(startrule, datatype, exprs)
         [startrule] :
         startrule
 
-    # build the grammar.
-    g = make_grammar(
-        startrule,
-        flatten(
-            @eval(__module__, Dict($pairs...)),
-            @eval(__module__, $datatype)
-        )
-    )
 
     return quote 
         $x -> $P.parse($g, $x)
     end |> esc
 end
 
+"""
+    @syntax startrule exprs
+
+Shorthand for `@syntax startrule datatype exprs`
+where `datatype` is set to `Char`.
+"""
 macro syntax(startrule, expr)
-    P = find_pikaparser(__module__)
+    P = @__MODULE__
     return quote 
         $P.@syntax($startrule, Char, $expr)
     end |> esc
 end
 
 """
-    @semantics startrule datatype exprs
+    @semantics startrule match parsestate submatches exprs
 
-Define semantics of a grammar with rules given by "exprs".
+Define semantics of a grammar with rules given by `exprs`.
 
 This macro returns a function which can be applied to a
 ParserState object, returning Julia datatypes as
 defined by the semantic rules.
 
+The start rule is given by `startrule`; the parameters
+`match`, `parsestate`, and `submatches` are symbols which
+will be bound to the current PikaParser `Match` object,
+the current `ParserState`, and the liste of submatches.
+
+Code given in the semantics is executed in the context of
+a callback function to `traverse_match()`; local scopes may
+be introduced, and early-return may be used to construct types.
+
+Default behaviour is implemented for rules specified by
+`@syntax` but not in `@semantics` for ease of parser bring-up,
+so long as at least one semantic rule has been supplied by the user.
+Terminal symbols (i.e., symbols where the submatch list is empty)
+return their matching text (`match.view`). Nonterminal symbols
+return their list of submatches. This allows developers to immediately
+read out the resulting AST, and iteratively add semantic rules.
+
 An example invocation is given here.
 
 ```julia
-sem = P.@semantics :top m v begin
+sem = P.@semantics :top m p v begin
     :ident => Symbol(m.view)
     :decl  => v[1]
 end
@@ -200,10 +232,16 @@ syn("foo Bar bA9Z QUx") |> sem
     # => [:foo, :Bar, :bA9Z, :QUx]
 ```
 """
-macro semantics(top, match, submatches, exprs)
+macro semantics(
+    top::QuoteNode,
+    match::Symbol,
+    parsestate::Symbol,
+    submatches::Symbol,
+    exprs
+)
 
     rules, x = Expr[], gensym(:x)
-    P = find_pikaparser(__module__)
+    P = @__MODULE__
 
     # process the semantic rules.
     postwalk(exprs) do e
@@ -236,6 +274,58 @@ macro semantics(top, match, submatches, exprs)
         $x -> $P.traverse_match($x,
             $P.find_match_at!($x, $top, 1),
             fold = ($match, _, $submatches) -> $rules
+        )
+    end |> esc
+end
+
+"""
+    @semantics top match submatches exprs
+
+Most users will not need to access the parse state when
+bringing up semantics; the match view and submatches are
+usually sufficient. This is a shorthand invocation of
+`@semantics top match parsestate submatches exprs`
+which binds `parsestate` to `_`.
+"""
+macro semantics(
+    top::QuoteNode,
+    match::Symbol,
+    submatches::Symbol,
+    exprs
+)
+
+    P = @__MODULE__
+    return quote
+        $P.@semantics $top $match _ $submatches $exprs
+    end |> esc
+end
+
+"""
+    @semantics top
+
+If no rules are supplied to `@semantics`,
+terminal syntax rules will be resolved to their
+match views, and nonterminal rules will be
+resolved to their list of submatches. Each resolution
+is tagged as a `Pair` by the match rule.
+
+This is useful for initial semantic rule bring-up and
+validation of `@syntax` rules, and inspecting the AST.
+"""
+macro semantics(
+    top::QuoteNode
+)
+
+    P = @__MODULE__
+    @gensym match submatches x
+    return quote
+
+        $x -> $P.traverse_match($x,
+            $P.find_match_at!($x, $top, 1),
+            fold = ($match, _, $submatches) ->
+                $submatches == [] ? 
+                    $match.rule => $match.view :
+                    $match.rule => $submatches
         )
     end |> esc
 end
