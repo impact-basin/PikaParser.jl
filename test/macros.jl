@@ -45,10 +45,6 @@
     @test all(folded .== ids)
 end
 
-x = @macroexpand Threads.@threads for i=1:10
-    @show i
-end
-
 @testset "Helper macros with local symbols " begin
     function test_local_scoping()
 
