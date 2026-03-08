@@ -1,4 +1,7 @@
+
 @testset "Helper macros" begin
+
+    using Logging
 
     identifiers = P.@syntax :top begin
         :ws    => first(satisfy(isspace), epsilon)
@@ -43,38 +46,41 @@
     ids = identifiers("foo Bar bA9Z QUx") |> idents_to_syms
     @test all(folded .== ids)
 
-    # this declaration must happen outside of the local
-    # scope created by testset.
-    global myisdigit(x) = isdigit(x)
-    global myisspace(x) = isspace(x)
+    function test_local_scoping()
 
-    syntax = P.@syntax :top begin
-        :ws     => many(satisfy(myisspace))
-        :number => some(:digit => satisfy(myisdigit))
-        :plus   => seq(:pexpr, :ws, token('+'), :ws, :pexpr, :ws)
-        :minus  => seq(:pexpr, :ws, token('-'), :ws, :pexpr, :ws)
-        :times  => seq(:pexpr, :ws, token('*'), :ws, :pexpr, :ws)
-        :divby  => seq(:pexpr, :ws, token('/'), :ws, :pexpr, :ws)
-        :paren  => seq(token('('), :ws, :expr, :ws, token(')'), :ws)
-        :expr   => first(:times, :divby, :plus, :minus, :number)
-        :pexpr  => first(:paren, :expr)
-        :top    => seq(:ws, :pexpr)
+        myisdigit(x) = isdigit(x)
+        myisspace(x) = isspace(x)
+
+        syntax = P.@syntax :top begin
+            :ws     => many(satisfy(myisspace))
+            :number => some(:digit => satisfy(myisdigit))
+            :plus   => seq(:pexpr, :ws, token('+'), :ws, :pexpr, :ws)
+            :minus  => seq(:pexpr, :ws, token('-'), :ws, :pexpr, :ws)
+            :times  => seq(:pexpr, :ws, token('*'), :ws, :pexpr, :ws)
+            :divby  => seq(:pexpr, :ws, token('/'), :ws, :pexpr, :ws)
+            :paren  => seq(token('('), :ws, :expr, :ws, token(')'), :ws)
+            :expr   => first(:times, :divby, :plus, :minus, :number)
+            :pexpr  => first(:paren, :expr)
+            :top    => seq(:ws, :pexpr)
+        end
+
+        semantics = @P.semantics :top m v begin
+            :number => parse(Int, m.view)
+            :expr   => v[1]
+            :plus   => v[1] + v[5]
+            :minus  => v[1] - v[5]
+            :times  => v[1] * v[5]
+            :divby  => v[1] / v[5]
+            :paren  => v[3]
+            :expr   => v[1]
+            :pexpr  => v[1]
+            :top    => v[2]
+        end
+
+        return x -> x |> syntax |> semantics
     end
 
-    semantics = @P.semantics :top m v begin
-        :number => parse(Int, m.view)
-        :expr   => v[1]
-        :plus   => v[1] + v[5]
-        :minus  => v[1] - v[5]
-        :times  => v[1] * v[5]
-        :divby  => v[1] / v[5]
-        :paren  => v[3]
-        :expr   => v[1]
-        :pexpr  => v[1]
-        :top    => v[2]
-    end
-
-    calc = x -> x |> syntax |> semantics
+    calc = test_local_scoping()
 
     @test calc("3 + 2 + 8") == 13
     @test calc("3 * (2 + 16)") == 54

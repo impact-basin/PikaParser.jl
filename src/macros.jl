@@ -34,6 +34,68 @@ function prepare_regex(regexstr, P)
     end
 end
 
+function prepare_grammar(
+    clauses,
+    startrule,
+    datatype,
+    __module__
+)
+
+    P = @__MODULE__
+    startrule = @eval(__module__, $startrule)
+    startrule = startrule isa Symbol ?
+        [startrule] :
+        startrule
+
+    try
+
+        # evaluate syntax rules
+        pairs = map(clauses) do clause
+            @eval(__module__, $(clause.first)) => 
+                @eval(__module__, $(clause.second))
+        end
+
+        # build the grammar.
+        g = make_grammar(
+            startrule,
+            flatten(
+                @eval(__module__, Dict($pairs...)),
+                @eval(__module__, $datatype)
+            )
+        )
+
+        return g, :nothing
+
+    catch e
+
+        # we can only ameliorate bad symbol lookups here.
+        e isa UndefVarError || rethrow()
+
+        @warn("``$(e.var)``: Symbol not resolvable at macro time.\n\n"    *
+              "Evaluation of the grammar will be deferred to runtime.\n"            *
+              "Ensure that all symbols used in clauses are available at\n"          *
+              "the toplevel scope of module $__module__ for macro-time grammars.")
+
+
+        @gensym gram
+
+        ids = map(x -> x.first,  clauses)
+        def = map(x -> x.second, clauses)
+
+        expr = quote
+            $gram = $P.make_grammar(
+                $startrule,
+                $P.flatten(
+                    Dict([$(ids...)] .=> [$(def...)]),
+                    $datatype
+                )
+            )
+        end
+
+        return gram, expr.args[2]
+    end
+end
+
 
 """
     @syntax startrule datatype exprs
@@ -80,7 +142,7 @@ syn("foo Bar bA9Z QUx") |> sem
 """
 macro syntax(startrule, datatype, exprs)
 
-    ids, clauses = [], []
+    clauses = []
     @gensym x
 
     P = @__MODULE__
@@ -121,50 +183,21 @@ macro syntax(startrule, datatype, exprs)
             return e
 
         # store the id and clause; return the ID
-        push!(ids, id)
-        push!(clauses, clause)
+        push!(clauses, id => clause)
         return id
     end
 
-    try
+    g, deferred_grammar_build = prepare_grammar(
+        clauses,
+        startrule,
+        datatype,
+        __module__
+    )
 
-        pairs = map(zip(ids, clauses)) do (id, clause)
-            @eval(__module__, $id) => @eval(__module__, $clause)
-        end
-
-        # build the grammar.
-        g = make_grammar(
-            startrule,
-            flatten(
-                @eval(__module__, Dict($pairs...)),
-                @eval(__module__, $datatype)
-            )
-        )
-
-    catch e
-
-        e isa UndefVarError || rethrow()
-
-        @warn("Symbols in syntax clauses were not resolvable at compile-time. "    *
-              "Evaluation of the grammar will be deferred to runtime. "            *
-              "Ensure that all symbols used in clauses are available at "          *
-              "the toplevel scope of module $__module__ for macro-time evaluation.")
-
-        pairs = map(zip(ids, clauses)) do (id, clause)
-            resolved_id = @eval(__module__, $id)
-            resolved_id => clause
-        end |> Dict
-    end
-
-    startrule = @eval(__module__, $startrule)
-    startrule = startrule isa Symbol ?
-        [startrule] :
-        startrule
-
-
-    return quote 
+    return quote begin
+        $deferred_grammar_build
         $x -> $P.parse($g, $x)
-    end |> esc
+    end end |> esc
 end
 
 """
