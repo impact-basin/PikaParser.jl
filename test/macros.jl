@@ -78,7 +78,7 @@ end
             :top    => seq(:ws, :pexpr)
         end true
 
-        semantics = @P.semantics :top m v begin
+        semantics = P.@semantics :top m v begin
             :number => parse(Int, m.view)
             :expr   => v[1]
             :plus   => v[1] + v[5]
