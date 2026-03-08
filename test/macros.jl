@@ -38,15 +38,32 @@
     idents_to_syms = P.@semantics :top m v begin
         :ident => Symbol(m.view)
         :decl  => v[1]
+        :top   => v
     end
 
     ids = identifiers("foo Bar bA9Z QUx") |> idents_to_syms
     @test all(folded .== ids)
+end
 
+x = @macroexpand Threads.@threads for i=1:10
+    @show i
+end
+
+@testset "Helper macros with local symbols " begin
     function test_local_scoping()
 
         myisdigit(x) = isdigit(x)
         myisspace(x) = isspace(x)
+
+        syntax_exprs = @macroexpand P.@syntax :top begin
+            :ws     => many(satisfy(myisspace))
+            :number => some(:digit => satisfy(myisdigit))
+            :top    => seq(:ws, :number)
+        end true
+
+        @test :(:make_grammar) ==
+            syntax_exprs.args[2].args[2].args[2].
+                         args[1].args[2]
 
         syntax = P.@syntax :top begin
             :ws     => many(satisfy(myisspace))
@@ -59,7 +76,7 @@
             :expr   => first(:times, :divby, :plus, :minus, :number)
             :pexpr  => first(:paren, :expr)
             :top    => seq(:ws, :pexpr)
-        end
+        end true
 
         semantics = @P.semantics :top m v begin
             :number => parse(Int, m.view)
@@ -76,9 +93,6 @@
 
         return x -> x |> syntax |> semantics
     end
-    @info "No further warnings expected on stderr.\n" *
-          "This warning occurs due to a macro-time invocation of @warn.\n" *
-          "This is intended behaviour for this test and can be ignored."
 
     calc = test_local_scoping()
 
@@ -86,4 +100,3 @@
     @test calc("3 * (2 + 16)") == 54
     @test calc("3 + 5 * (2 + 16)") == 93
 end
-

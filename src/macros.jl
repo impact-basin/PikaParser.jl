@@ -38,6 +38,7 @@ function prepare_grammar(
     clauses,
     startrule,
     datatype,
+    nowarn,
     __module__
 )
 
@@ -71,10 +72,13 @@ function prepare_grammar(
         # we can only ameliorate bad symbol lookups here.
         e isa UndefVarError || rethrow()
 
-        @warn("``$(e.var)``: Symbol not resolvable at macro time.\n\n"    *
-              "Evaluation of the grammar will be deferred to runtime.\n"            *
-              "Ensure that all symbols used in clauses are available at\n"          *
-              "the toplevel scope of module $__module__ for macro-time grammars.")
+        # warn the user that their symbols were unresolvable.
+        # suppress during testing with unresolvable symbols.
+        nowarn ||
+            @warn "``$(e.var)``: Symbol not resolvable at macro time.\n\n"          *
+                  "Evaluation of the grammar will be deferred to runtime.\n"        *
+                  "Ensure that all symbols used in clauses are available at\n"      *
+                  "the toplevel scope of module $__module__ for macro-time grammars."
 
 
         @gensym gram
@@ -98,23 +102,23 @@ end
 
 
 """
-    @syntax startrule datatype exprs
+    @syntax startrule datatype exprs [nowarn]
 
-Define syntax of a grammar with rules given by "exprs".
+Define syntax of a grammar with rules given by `exprs`.
 
 This produces a PikaParser grammar at compile-time,
 and returns a function applying the grammar to
 an input string. PikaParser symbols (`first`, `seq`, etc.)
 will be resolved to the PikaParser module.
 
-Note that any variables or helper functions used in
-rule expressions must be resolvable at toplevel module scope.
-This is because compile-time grammar preparation must `@eval`
-into the invoking module at macro evaluation time to resolve
-any helper functions defined by PikaParser users; local
-scopes are not accessible to PikaParser. 
+To build grammars at compile-time, all symbols must be
+resolvable in the toplevel module. If this is not the case,
+PikaParser will pass a warning to the user and attempt to
+build the grammar at runtime. If this is intended behaviour,
+the user may suppress the warning by setting `nowarn` to `true`.
+Otherwise, no argument need be specified.
 
-An example invocation is given herein.
+For example usage, we will parse a list of symbols from a string.
 
 ```julia
 syn = P.@syntax :top begin
@@ -140,7 +144,7 @@ syn("foo Bar bA9Z QUx") |> sem
     # => [:foo, :Bar, :bA9Z, :QUx]
 ```
 """
-macro syntax(startrule, datatype, exprs)
+macro syntax(startrule, datatype, exprs::Expr, nowarn::Bool=false)
 
     clauses = []
     @gensym x
@@ -191,25 +195,26 @@ macro syntax(startrule, datatype, exprs)
         clauses,
         startrule,
         datatype,
+        nowarn,
         __module__
     )
 
-    return quote begin
+    return quote
         $deferred_grammar_build
         $x -> $P.parse($g, $x)
-    end end |> esc
+    end |> esc
 end
 
 """
-    @syntax startrule exprs
+    @syntax startrule exprs [nowarn]
 
-Shorthand for `@syntax startrule datatype exprs`
+Shorthand for `@syntax startrule datatype exprs [nowarn]`
 where `datatype` is set to `Char`.
 """
-macro syntax(startrule, expr)
+macro syntax(startrule, expr::Expr, nowarn::Bool=false)
     P = @__MODULE__
     return quote 
-        $P.@syntax($startrule, Char, $expr)
+        $P.@syntax($startrule, Char, $expr, $nowarn)
     end |> esc
 end
 
@@ -288,8 +293,8 @@ macro semantics(
                 $value
             else
                 $submatches == [] ?
-                    $match.view :
-                    $submatches
+                    $match.rule => $match.view :
+                    $match.rule => $submatches
             end
         end)
 
@@ -306,7 +311,7 @@ macro semantics(
     return quote
         $x -> $P.traverse_match($x,
             $P.find_match_at!($x, $top, 1),
-            fold = ($match, _, $submatches) -> $rules
+            fold = ($match, $parsestate, $submatches) -> $rules
         )
     end |> esc
 end
