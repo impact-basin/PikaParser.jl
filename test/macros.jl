@@ -1,7 +1,4 @@
-
 @testset "Helper macros" begin
-
-    using Logging
 
     identifiers = P.@syntax :top begin
         :ws    => first(satisfy(isspace), epsilon)
@@ -79,6 +76,9 @@
 
         return x -> x |> syntax |> semantics
     end
+    @info "No further warnings expected on stderr.\n" *
+          "This warning occurs due to a macro-time invocation of @warn.\n" *
+          "This is intended behaviour for this test and can be ignored."
 
     calc = test_local_scoping()
 
