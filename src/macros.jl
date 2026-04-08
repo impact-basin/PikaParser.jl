@@ -182,6 +182,8 @@ macro syntax(startrule, datatype, exprs::Expr, nowarn::Bool=false)
         @capture(e, @r_str regexstr__) &&
             return prepare_regex(regexstr, P)
 
+        # TODO: precedence_cascade
+
         # return if we don't have a syntax rule
         @capture(e, id_quote => clause_) ||
             return e
